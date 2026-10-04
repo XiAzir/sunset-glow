@@ -3,9 +3,11 @@ name: 连通性测试
 # 只做一件事：验证 GitHub 的 runner 能不能访问两个目标站。
 # 这一步是部署前置：glowsunset.cn 和 pushplus.plus 都在阿里云国内节点、没有 CDN，
 # GitHub runner 在美国，跨境直连可能慢或被 WAF 拦。先确认通了再上正式任务。
+#
+# 注意：所有 shell 行必须保持同一缩进层级，块标量里混入不同缩进会破坏 YAML。
 
 on:
-  workflow_dispatch:      # 手动触发
+  workflow_dispatch:
 
 jobs:
   connectivity:
@@ -13,32 +15,22 @@ jobs:
     steps:
       - name: 测试 glowsunset.cn 接口
         run: |
-          echo "=== 解析 ==="
+          echo "=== DNS 解析 ==="
           getent hosts glowsunset.cn || echo "DNS 解析失败"
-          echo "=== 首页 ==="
-          curl -s -o /dev/null -w "HTTP:%{http_code} 连接:%{time_connect}s 首字节:%{time_starttransfer}s 总计:%{time_total}s\n" \
-            --max-time 30 "https://glowsunset.cn/" || echo "首页请求失败"
+          echo
           echo "=== 武汉预测接口（关键）==="
           curl -s --max-time 30 -w "\nHTTP:%{http_code} 总计:%{time_total}s\n" \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
             "https://glowsunset.cn/api/spot/wuhan" -o /tmp/wuhan.json || echo "接口请求失败"
-          echo "=== 返回内容摘要 ==="
-          if [ -f /tmp/wuhan.json ]; then
-            head -c 300 /tmp/wuhan.json
-            echo
-            python3 -c "
-import json
-try:
-    d = json.load(open('/tmp/wuhan.json', encoding='utf-8'))
-    print('解析成功')
-    print('  date      =', d.get('date'))
-    print('  spotName  =', d.get('spotName'))
-    print('  quality   =', d.get('quality'))
-    print('  grade     =', d.get('grade'))
-    print('  预测天数  =', len(d.get('forecast') or []))
-except Exception as e:
-    print('解析失败:', e)
-"
+          echo
+          if [ -s /tmp/wuhan.json ]; then
+            echo "--- 关键字段 ---"
+            jq -r '"date=\(.date) spot=\(.spotName) quality=\(.quality) grade=\(.grade) 预测天数=\(.forecast | length)"' /tmp/wuhan.json \
+              || echo "jq 解析失败"
+            echo "--- 原始片段 ---"
+            head -c 200 /tmp/wuhan.json
+          else
+            echo "未取到响应内容"
           fi
 
       - name: 测试 Open-Meteo（多模式校验用）
@@ -46,30 +38,33 @@ except Exception as e:
           curl -s --max-time 30 -w "\nHTTP:%{http_code} 总计:%{time_total}s\n" \
             "https://api.open-meteo.com/v1/forecast?latitude=30.544&longitude=114.302&hourly=cloud_cover_low&models=ecmwf_ifs025,gfs_seamless,cma_grapes_global&timezone=Asia%2FShanghai&forecast_days=1" \
             -o /tmp/om.json || echo "Open-Meteo 请求失败"
-          head -c 200 /tmp/om.json 2>/dev/null; echo
+          echo
+          if [ -s /tmp/om.json ]; then
+            jq -r '.hourly | keys | join(",")' /tmp/om.json 2>/dev/null || head -c 200 /tmp/om.json
+          fi
 
       - name: 测试 pushplus.plus（微信推送用）
         run: |
-          echo "=== 连通性（不发送真实消息，用无效 token 探测接口是否存在）==="
+          echo "用无效 token 探测接口是否存在（不会发真实消息）"
           curl -s --max-time 30 -X POST "https://www.pushplus.plus/send" \
             -H "Content-Type: application/json" \
-            -d '{"token":"connectivity_probe_only","title":"probe","content":"probe","template":"markdown"}' \
+            -d '{"token":"connectivity_probe_only","title":"probe","content":"probe"}' \
             -w "\nHTTP:%{http_code} 总计:%{time_total}s\n" || echo "pushplus 请求失败"
           echo
-          echo "说明：返回 {'code':903,'data':'无效的用户token'} 即为正常——"
-          echo "      说明接口可达、只是 token 是假的。若超时或被拒则是网络问题。"
+          echo "正常结果应为 code:903 无效的用户token —— 说明接口可达，只是 token 是假的"
+          echo "若超时或被拒，则是跨境网络问题"
 
-      - name: 测试 token 是否已配置
+      - name: 确认 Secret 已配置
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: |
           if [ -z "$PUSHPLUS_TOKEN" ]; then
-            echo "PUSHPLUS_TOKEN 未配置或为空 —— 需要到仓库 Settings > Secrets 添加"
+            echo "PUSHPLUS_TOKEN 未配置 —— 需到 Settings > Secrets 添加"
           else
             echo "PUSHPLUS_TOKEN 已配置，长度 ${#PUSHPLUS_TOKEN}"
           fi
 
-      - name: 检查 Python 运行时
+      - name: 检查 Python 环境
         run: |
           python3 --version
           echo "脚本仅用标准库，无需 pip install"
