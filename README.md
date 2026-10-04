@@ -2,14 +2,27 @@
 
 只在高分（值得拍）的日子提醒你，其他日子保持安静。每 6 小时检查一次数据，日落前会额外盯一次。
 
-## 两套运行方式
+## 当前部署状态
 
-| 方式 | 触发 | 何时用 |
-|---|---|---|
-| **GitHub Actions**（推荐，24h 可靠） | 云端定时，不依赖你的电脑 | 日常自动运行 |
-| 本机 Windows 任务计划 | 需登录且不休眠 | 备用 / 手动调试 |
+**已在 GitHub Actions 上运行，本机定时任务已停用。**
 
-> **同一时间只启用一套**。两套都开着会各推一条，因为状态文件不互通（云端是仓库里的 `state.json`，本机是本地的）。
+- 仓库：<https://github.com/change1010/sunset-glow>（私有）
+- 位置：武汉（黄鹤楼 / 长江大桥，`/api/spot/wuhan`）
+- 高分线：综合评分 **≥ 60**（官方分级：≥85 绝美 / ≥60 很棒 / ≥30 不错 / ≥1 平淡 / 0 无望）
+- 推送渠道：**只走微信**（PushPlus 消息token）
+- token 存放：GitHub Secrets 的 `PUSHPLUS_TOKEN`（不在仓库里）
+
+### 实测验证结果（2026-10-04）
+
+| 项目 | 结果 |
+|---|---|
+| glowsunset.cn 武汉接口 | HTTP 200，耗时 **0.91s** |
+| Open-Meteo 三模式 | HTTP 200，耗时 **0.64s** |
+| pushplus.plus | HTTP 200，耗时 **0.73s** |
+| 端到端推送 | ✅ 微信收到「武汉晚霞 21分·平淡」 |
+| 本机定时任务 | 已 Disabled（保留，可随时恢复） |
+
+跨境网络这一关比预期顺利：三个目标站都在 1 秒内响应，没有出现担心中的慢速或被拦。
 
 ## 推送格式
 
@@ -96,7 +109,9 @@ python sunset_glow.py --mode digest --force     # 忽略"今日已推送"去重
 
 也可以直接双击 `run.bat`（默认走 digest）。
 
-## 部署到 GitHub Actions（24 小时运行）
+## 部署方式说明
+
+### 为什么用 GitHub Actions
 
 本机的 Windows 任务计划有个硬伤：任务的登录类型是 `Interactive`，**只有你登录着 Windows 时才会触发**。关机、注销、系统更新后停在登录界面，都会静默停摆。GitHub Actions 跑在云端，与你电脑无关。
 
@@ -109,6 +124,8 @@ python sunset_glow.py --mode digest --force     # 忽略"今日已推送"去重
 | 月消耗 | ≈ 330 分钟 |
 | 私有仓库免费额度 | **2,000 分钟/月**，占用约 17% |
 
+对比：笔记本 24 小时待机约 20W，一年约 175 度电 ≈ ¥105，还得一直插电、一直登录、不合盖。GitHub 是 ¥0 且没有这些前提。
+
 ### 两个 workflow
 
 | 文件 | 频率 | 模式 |
@@ -120,41 +137,55 @@ cron 都用 `Asia/Shanghai` 时区，不需要自己换算 UTC。
 
 **为什么 cron 写 `:12` 和 `:07`，而不是整点？** GitHub 官方文档明确说 `The schedule event can be delayed during periods of high loads`，并建议 `schedule your workflow to run at a different time of the hour`。整点是全球最拥堵的时刻，错开能降低延迟概率。
 
-### 状态回写
+### 手动运行 / 调试
+
+在 GitHub 仓库的 **Actions** 页面：
+
+| 操作 | 说明 |
+|---|---|
+| `晚霞预报-常规检查` → Run workflow | 跑一次常规检查（今天 21 分，会正常判断为"不推送"） |
+| `晚霞预报-常规检查` → Run workflow → 勾选 `test_push` | **立刻发一条真实推送**，忽略高分阈值，用来验证微信链路 |
+| `晚霞预报-日落前加推` → Run workflow | 跑一次加推检查 |
+| `连通性测试` → Run workflow | 只做网络探测，不发消息 |
+
+`test_push` 模式不会写状态文件，所以不会影响正常的去重逻辑。
+
+也可以在本机直接跑（token 从 `local_secrets.json` 读）：
+
+```bash
+python sunset_glow.py --mode test        # 发一条真实测试推送
+python sunset_glow.py --mode digest      # 跑一次常规判定
+```
+
+### 状态回写与冲突
 
 去重状态存在 `state.json`，但 GitHub runner 每次都是全新环境、跑完即销毁，所以每个 workflow 最后都有一步把 `state.json` 提交回仓库。这一步同时让仓库保持活跃，规避"60 天无活动自动禁用 scheduled workflow"的政策（该政策官方原文针对公开仓库）。
 
 两个 workflow 共用 `concurrency: sunset-glow` 互斥组，避免同时提交冲突。
 
-### 首次部署步骤
+**注意**：如果你在本地改完代码要 push，而云端 runner 刚好回写过 `state.json`，push 会被拒。先 `git pull --rebase origin main` 再推即可。这是回写机制的正常表现，不是故障。
 
-1. 建一个**私有**仓库，推上本项目
-2. 仓库 **Settings → Secrets and variables → Actions → New repository secret**，添加 `PUSHPLUS_TOKEN`
-3. 手动触发 `连通性测试` workflow，确认 runner 能访问目标站点（**这一步很关键，见下**）
-4. 手动触发 `晚霞预报-常规检查`，确认微信收到推送
-5. 确认无误后，**停掉本机定时任务**，避免重复推送
+### 跨境网络（已实测通过）
 
-### ⚠️ 部署前必须验证的跨境网络问题
+`glowsunset.cn` 和 `www.pushplus.plus` 都托管在**阿里云国内节点且没有走 CDN**（实测分别解析到 8.130.45.255 北京、121.40.246.120 杭州），而 GitHub 的 runner 在美国。原本担心跨境直连会慢或被 WAF 拦，所以先做了 `connectivity-test.yml` 这道只读探测关卡。
 
-`glowsunset.cn` 和 `www.pushplus.plus` 都托管在**阿里云国内节点且没有走 CDN**（实测分别解析到 8.130.45.255 北京、121.40.246.120 杭州），而 GitHub 的 runner 在美国。跨境直连国内源站可能慢、也可能被 WAF 拦。
+**实测结论（2026-10-04）：没有这个问题。** 三个站点都在 1 秒内响应（0.91s / 0.64s / 0.73s），接口数据完整。若将来出现超时，重新跑一次连通性测试即可定位。
 
-所以 `.github/workflows/connectivity-test.yml` 是**部署的第一道关卡**：它只做只读探测（不会真的发消息），打印两个站点的 HTTP 状态码、耗时和接口返回摘要。跑通了再启用正式任务；如果被拦，就得换方案（比如保留本机运行）。
+## 本机定时任务（已停用，备用）
 
-## 本机定时任务（备用）
-
-| 任务名 | 频率 | 说明 |
+| 任务名 | 频率 | 状态 |
 |---|---|---|
-| `SunsetGlow_Digest` | 每 6 小时（06:12 / 12:12 / 18:12 / 00:12） | 常规检查，只在今天达到高分线时推送 |
-| `SunsetGlow_PreSunset` | 每天 14:00–20:00 每小时 | 日落前窗口检查，达标时加推一条提醒你出门；每天最多一条 |
+| `SunsetGlow_Digest` | 每 6 小时（06:12 / 12:12 / 18:12 / 00:12） | **Disabled** |
+| `SunsetGlow_PreSunset` | 每天 14:00–20:00 每小时 | **Disabled** |
 
-⚠️ 这两个任务的登录类型是 `Interactive`（仅登录时运行）。要和 GitHub Actions 二选一，不要同时开。
+已停用是为了避免和 GitHub Actions 重复推送（两边状态文件不互通，会各推一条）。保留而非删除，是为了万一云端出问题可以立刻切回。
 
 管理命令（管理员或普通权限均可）：
 
 ```powershell
 Get-ScheduledTask -TaskName 'SunsetGlow_*'                    # 查看状态
+Enable-ScheduledTask -TaskName 'SunsetGlow_Digest'            # 恢复（记得同时停用云端）
 Disable-ScheduledTask -TaskName 'SunsetGlow_Digest'           # 暂停
-Enable-ScheduledTask -TaskName 'SunsetGlow_Digest'            # 恢复
 Start-ScheduledTask -TaskName 'SunsetGlow_Digest'             # 立即跑一次
 Unregister-ScheduledTask -TaskName 'SunsetGlow_Digest' -Confirm:$false   # 删除
 ```
@@ -203,8 +234,12 @@ Unregister-ScheduledTask -TaskName 'SunsetGlow_Digest' -Confirm:$false   # 删�
 | 文件 | 作用 |
 |---|---|
 | `sunset_glow.py` | 主脚本 |
-| `config.json` | 配置（位置、阈值、渠道 token） |
-| `state.json` | 去重状态与最近一次校验结果 |
-| `logs/sunset_glow.log` | 运行日志（每次运行都记，方便回溯"为什么没推"） |
-| `run.bat` | 手动运行入口 |
-| `register_tasks.ps1` | 重新注册定时任务 |
+| `config.json` | 配置（位置、阈值、渠道开关）。**不要在这里填 token** |
+| `local_secrets.json` | 本机运行用的 token（已 gitignore，不会提交） |
+| `state.json` | 去重状态与最近一次校验结果（云端跑完会回写进仓库） |
+| `.github/workflows/digest.yml` | 云端：每 6 小时常规检查（支持手动 + test_push） |
+| `.github/workflows/alert.yml` | 云端：下午每小时日落前加推检查 |
+| `.github/workflows/connectivity-test.yml` | 云端：网络连通性探测（不发消息） |
+| `logs/sunset_glow.log` | 本机运行日志 |
+| `run.bat` | 本机手动运行入口 |
+| `register_tasks.ps1` | 重新注册本机定时任务 |
