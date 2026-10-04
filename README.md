@@ -2,12 +2,14 @@
 
 只在高分（值得拍）的日子提醒你，其他日子保持安静。每 6 小时检查一次数据，日落前会额外盯一次。
 
-## 当前状态
+## 两套运行方式
 
-- 位置：武汉（黄鹤楼 / 长江大桥，`/api/spot/wuhan` 对应的机位）
-- 高分线：综合评分 **≥ 60**（网站官方分级：≥85 绝美 / ≥60 很棒 / ≥30 不错 / ≥1 平淡 / 0 无望）
-- 推送渠道：**只走微信**（PushPlus）。桌面弹窗代码已移除，不再需要
-- 定时任务：已注册（见"定时任务"节）
+| 方式 | 触发 | 何时用 |
+|---|---|---|
+| **GitHub Actions**（推荐，24h 可靠） | 云端定时，不依赖你的电脑 | 日常自动运行 |
+| 本机 Windows 任务计划 | 需登录且不休眠 | 备用 / 手动调试 |
+
+> **同一时间只启用一套**。两套都开着会各推一条，因为状态文件不互通（云端是仓库里的 `state.json`，本机是本地的）。
 
 ## 推送格式
 
@@ -51,42 +53,36 @@
 python sunset_glow.py --mode test --dry-run
 ```
 
-## 微信推送配置（已配置完成）
+## Token 存放（重要：不要写进 config.json）
 
-二选一，推荐 PushPlus（免费额度 200 条/天，比 Server酱 的 5 条/天宽松）。
+**token 绝不写在 `config.json` 里**，因为那个文件要提交到仓库。按运行方式来选：
 
-**方案 A：PushPlus**
-1. 手机微信扫码登录 <https://www.pushplus.plus/>
-2. 在「一对一推送」页面创建并复制一个 **消息token**（不要用用户token，原因见下方说明）
-3. 打开 `E:\Sunset\config.json`，把 `channels.wechat` 改成：
+| 运行方式 | token 放哪 |
+|---|---|
+| GitHub Actions | 仓库 **Settings → Secrets and variables → Actions → New repository secret**，名称 `PUSHPLUS_TOKEN` |
+| 本机手动运行 | 项目目录下建 `local_secrets.json`（已 gitignore，不会被提交） |
+
+`local_secrets.json` 格式：
 
 ```json
-"wechat": {
-  "enabled": true,
-  "provider": "pushplus",
-  "token": "这里粘贴你的消息token"
+{
+  "PUSHPLUS_TOKEN": "你的消息token"
 }
 ```
+
+取 token 的优先级是：**环境变量 → `local_secrets.json` → `config.json`**。所以在 GitHub 上由 Secrets 注入的环境变量永远优先，本机则自动落到 `local_secrets.json`。
+
+推送服务二选一，推荐 PushPlus（免费额度 200 条/天，比 Server酱 的 5 条/天宽松）：
+
+- **PushPlus**：微信扫码登录 <https://www.pushplus.plus/>，在「一对一推送」页创建一个 **消息token**，`provider` 填 `pushplus`
+- **Server酱**：微信扫码登录 <https://sct.ftqq.com/>，复制 SendKey，`provider` 填 `serverchan`，环境变量名用 `SERVERCHAN_TOKEN`
 
 > **为什么用消息token而不是用户token？** 官方文档《用户token和消息token有什么区别》原文：
 > - 「用户token和消息token均可以用于发送消息，填写在"token"参数上。」——本脚本用的 `/send` 接口两者都支持。
 > - 「消息token可创建多个，可自行标识使用的场景，方便管理和维护。**主要用在第三方开发的脚本、程序或系统上。**」——正是本脚本的场景。
-> - 「用户token代表具体您是哪个用户，有且仅有一个，**无法删除**。」——而消息token可以随时删除重建。
->
-> 脚本会把 token 明文保存在 `config.json` 里，用可删除可轮换的消息token更安全，也方便你按脚本命名（比如起名「晚霞预报」），以后一眼看出是哪个程序在用、要撤销时也只影响这一个。
+> - 「用户token代表具体您是哪个用户，有且仅有一个，**无法删除**。」——而消息token可以随时删除重建，万一泄露可立刻撤销，不用换账号。
 >
 > 注：文档里另有一条「开放接口调用需要使用用户token，不支持消息token」——那指的是另一套接口（[开放接口文档](https://www.pushplus.plus/doc/guide/openApi.html)），本脚本用的是消息接口 `/send`，不受此限制。
-
-**方案 B：Server酱**
-1. 微信扫码登录 <https://sct.ftqq.com/>，复制 SendKey
-2. `config.json` 里改成 `"provider": "serverchan"`，token 填 SendKey
-
-改完之后跑一次测试，确认微信能收到：
-
-```bash
-cd /d E:\Sunset
-python sunset_glow.py --mode test
-```
 
 ## 常用命令
 
@@ -100,12 +96,58 @@ python sunset_glow.py --mode digest --force     # 忽略"今日已推送"去重
 
 也可以直接双击 `run.bat`（默认走 digest）。
 
-## 定时任务
+## 部署到 GitHub Actions（24 小时运行）
+
+本机的 Windows 任务计划有个硬伤：任务的登录类型是 `Interactive`，**只有你登录着 Windows 时才会触发**。关机、注销、系统更新后停在登录界面，都会静默停摆。GitHub Actions 跑在云端，与你电脑无关。
+
+### 成本
+
+| 项 | 数字 |
+|---|---|
+| 运行次数 | 常规 4 次/天 + 加推 7 次/天 = 11 次/天 ≈ 330 次/月 |
+| 计费 | 按分钟计，**每次最低 1 分钟**（哪怕只跑 5 秒） |
+| 月消耗 | ≈ 330 分钟 |
+| 私有仓库免费额度 | **2,000 分钟/月**，占用约 17% |
+
+### 两个 workflow
+
+| 文件 | 频率 | 模式 |
+|---|---|---|
+| `.github/workflows/digest.yml` | 每 6 小时（cron `12 */6 * * *`） | `--mode digest` |
+| `.github/workflows/alert.yml` | 每天 14:00–20:00 每小时（`7 14-20 * * *`） | `--mode alert` |
+
+cron 都用 `Asia/Shanghai` 时区，不需要自己换算 UTC。
+
+**为什么 cron 写 `:12` 和 `:07`，而不是整点？** GitHub 官方文档明确说 `The schedule event can be delayed during periods of high loads`，并建议 `schedule your workflow to run at a different time of the hour`。整点是全球最拥堵的时刻，错开能降低延迟概率。
+
+### 状态回写
+
+去重状态存在 `state.json`，但 GitHub runner 每次都是全新环境、跑完即销毁，所以每个 workflow 最后都有一步把 `state.json` 提交回仓库。这一步同时让仓库保持活跃，规避"60 天无活动自动禁用 scheduled workflow"的政策（该政策官方原文针对公开仓库）。
+
+两个 workflow 共用 `concurrency: sunset-glow` 互斥组，避免同时提交冲突。
+
+### 首次部署步骤
+
+1. 建一个**私有**仓库，推上本项目
+2. 仓库 **Settings → Secrets and variables → Actions → New repository secret**，添加 `PUSHPLUS_TOKEN`
+3. 手动触发 `连通性测试` workflow，确认 runner 能访问目标站点（**这一步很关键，见下**）
+4. 手动触发 `晚霞预报-常规检查`，确认微信收到推送
+5. 确认无误后，**停掉本机定时任务**，避免重复推送
+
+### ⚠️ 部署前必须验证的跨境网络问题
+
+`glowsunset.cn` 和 `www.pushplus.plus` 都托管在**阿里云国内节点且没有走 CDN**（实测分别解析到 8.130.45.255 北京、121.40.246.120 杭州），而 GitHub 的 runner 在美国。跨境直连国内源站可能慢、也可能被 WAF 拦。
+
+所以 `.github/workflows/connectivity-test.yml` 是**部署的第一道关卡**：它只做只读探测（不会真的发消息），打印两个站点的 HTTP 状态码、耗时和接口返回摘要。跑通了再启用正式任务；如果被拦，就得换方案（比如保留本机运行）。
+
+## 本机定时任务（备用）
 
 | 任务名 | 频率 | 说明 |
 |---|---|---|
 | `SunsetGlow_Digest` | 每 6 小时（06:12 / 12:12 / 18:12 / 00:12） | 常规检查，只在今天达到高分线时推送 |
 | `SunsetGlow_PreSunset` | 每天 14:00–20:00 每小时 | 日落前窗口检查，达标时加推一条提醒你出门；每天最多一条 |
+
+⚠️ 这两个任务的登录类型是 `Interactive`（仅登录时运行）。要和 GitHub Actions 二选一，不要同时开。
 
 管理命令（管理员或普通权限均可）：
 
