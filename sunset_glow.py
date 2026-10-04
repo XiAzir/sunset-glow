@@ -383,12 +383,15 @@ def dispatch(config: dict, title: str, markdown: str, dry_run: bool) -> None:
         log("[dry-run] 未实际发送")
         return
     wechat = config["channels"].get("wechat") or {}
-    if wechat.get("enabled") and (wechat.get("token") or "").strip():
-        send_wechat(config, title, markdown)
-    elif wechat.get("enabled"):
-        log("微信推送已启用但未填写 token，跳过。请见 config.json 的 channels.wechat.token")
-    else:
+    if not wechat.get("enabled"):
         log("微信推送未启用，本次不发送")
+        return
+    # 用 resolve_token 判断，才能识别出环境变量/Secrets 注入的 token
+    if not resolve_token(wechat):
+        log("微信推送已启用但未取到 token，跳过。本机请填 local_secrets.json，"
+            "GitHub Actions 请配置 PUSHPLUS_TOKEN secret")
+        return
+    send_wechat(config, title, markdown)
 
 
 # --------------------------------------------------------------------------
