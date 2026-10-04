@@ -1,0 +1,21 @@
+name: 调度机制测试
+
+# 诊断用：验证 schedule 触发器本身是否工作。
+# 每分钟触发一次，只打印时间，不访问网络、不发消息。
+# 确认 schedule 正常后请删除本文件。
+
+on:
+  schedule:
+    - cron: '* * * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 打印时间
+        run: |
+          echo "schedule 触发生效"
+          echo "UTC 时间: $(date -u '+%Y-%m-%d %H:%M:%S')"
+          echo "北京时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+          echo "事件类型: ${{ github.event_name }}"
