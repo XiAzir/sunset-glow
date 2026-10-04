@@ -9,6 +9,11 @@ on:
     - cron: '12 */6 * * *'
       timezone: 'Asia/Shanghai'
   workflow_dispatch:        # 手动触发按钮，方便调试
+    inputs:
+      test_push:
+        description: '勾选后发送一条真实测试推送（忽略高分阈值），用于验证微信能收到'
+        type: boolean
+        default: false
 
 permissions:
   contents: write           # 用于回写 state.json
@@ -26,9 +31,16 @@ jobs:
       - name: 运行检查
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-        run: python3 sunset_glow.py --mode digest
+        run: |
+          if [ "${{ inputs.test_push }}" = "true" ]; then
+            echo "手动测试模式：发送真实推送（不写状态文件）"
+            python3 sunset_glow.py --mode test
+          else
+            python3 sunset_glow.py --mode digest
+          fi
 
       - name: 回写去重状态
+        if: ${{ inputs.test_push != true }}
         run: |
           git config user.name  "sunset-glow-bot"
           git config user.email "sunset-glow-bot@users.noreply.github.com"
