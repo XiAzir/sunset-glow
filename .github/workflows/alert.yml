@@ -1,0 +1,40 @@
+name: 晚霞预报-日落前加推
+
+# 下午每小时检查一次。脚本内部自行判断是否落在"日落前窗口"内，
+# 且当天已推送过就不会重复推，所以这里每小时跑一次是安全的。
+
+on:
+  schedule:
+    - cron: '7 14-20 * * *'
+      timezone: 'Asia/Shanghai'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sunset-glow
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 运行检查
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python3 sunset_glow.py --mode alert
+
+      - name: 回写去重状态
+        run: |
+          git config user.name  "sunset-glow-bot"
+          git config user.email "sunset-glow-bot@users.noreply.github.com"
+          git add state.json
+          if git diff --staged --quiet; then
+            echo "state.json 无变化，不提交"
+          else
+            git commit -m "chore: 更新推送状态 [skip ci]"
+            git push
+          fi
