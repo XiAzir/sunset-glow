@@ -2,11 +2,13 @@ name: 晚霞预报-日落前加推
 
 # 下午每小时检查一次。脚本内部自行判断是否落在"日落前窗口"内，
 # 且当天已推送过就不会重复推，所以这里每小时跑一次是安全的。
+#
+# cron 用 UTC（GitHub 的 schedule 只认 UTC）。
+# 换算：北京 14:00–20:00 => UTC 06:00–12:00，所以写 `7 6-12 * * *`。
 
 on:
   schedule:
-    - cron: '7 14-20 * * *'
-      timezone: 'Asia/Shanghai'
+    - cron: '7 6-12 * * *'
   workflow_dispatch:
 
 permissions:

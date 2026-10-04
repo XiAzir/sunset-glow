@@ -1,13 +1,17 @@
 name: 晚霞预报-常规检查
 
 # 每 6 小时检查一次。只在当天评分达到阈值时推送。
-# 注意 cron 用 :12 而非整点：官方文档说 schedule 在高峰期会延迟，
-# 并建议错开整点来降低延迟概率。
+#
+# cron 用 UTC（GitHub 的 schedule 只认 UTC，官方文档没有 timezone 字段）。
+# 换算：北京 06:12 / 12:12 / 18:12 / 00:12  =>  UTC 22:12 / 04:12 / 10:12 / 16:12
+# 即下面的 `12 4,10,16,22 * * *`（小时列表排序后书写，仅便于阅读）。
+#
+# 用 :12 而非整点：官方原文说 schedule 在高峰期会延迟、排队任务甚至可能被丢弃，
+# 并建议 "schedule your workflow to run at a different time of the hour"。
 
 on:
   schedule:
-    - cron: '12 */6 * * *'
-      timezone: 'Asia/Shanghai'
+    - cron: '12 4,10,16,22 * * *'
   workflow_dispatch:        # 手动触发按钮，方便调试
     inputs:
       test_push:
