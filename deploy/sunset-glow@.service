@@ -16,7 +16,9 @@ Environment=SUNSET_GLOW_LOG_DIR=/var/log/sunset-glow
 EnvironmentFile=/etc/sunset-glow.env
 ExecStart=/usr/bin/flock --nonblock /var/lib/sunset-glow/run.lock /usr/bin/python3 -u /opt/sunset-glow/sunset_glow.py --mode %i
 StateDirectory=sunset-glow
+StateDirectoryMode=0700
 LogsDirectory=sunset-glow
+LogsDirectoryMode=0700
 UMask=0077
 TimeoutStartSec=300
 MemoryMax=96M
