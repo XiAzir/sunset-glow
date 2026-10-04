@@ -34,17 +34,18 @@ jobs:
 
       - name: 运行检查
         env:
+          TZ: Asia/Shanghai
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: |
           if [ "${{ inputs.test_push }}" = "true" ]; then
-            echo "手动测试模式：发送真实推送（不写状态文件）"
+            echo "手动测试模式：发送真实推送（不新增去重记录、不回写仓库）"
             python3 sunset_glow.py --mode test
           else
             python3 sunset_glow.py --mode digest
           fi
 
       - name: 回写去重状态
-        if: ${{ inputs.test_push != true }}
+        if: ${{ always() && inputs.test_push != true }}
         run: |
           git config user.name  "sunset-glow-bot"
           git config user.email "sunset-glow-bot@users.noreply.github.com"

@@ -24,13 +24,13 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.json"
-STATE_PATH = BASE_DIR / "state.json"
-LOG_DIR = BASE_DIR / "logs"
+STATE_PATH = Path(os.environ.get("SUNSET_GLOW_STATE_PATH", BASE_DIR / "state.json"))
+LOG_DIR = Path(os.environ.get("SUNSET_GLOW_LOG_DIR", BASE_DIR / "logs"))
 
 GLOWSUNSET_SPOT_API = "https://glowsunset.cn/api/spot/{spot}"
 OPEN_METEO_API = "https://api.open-meteo.com/v1/forecast"
@@ -46,6 +46,12 @@ GRADE_TIERS = [
 ]
 
 STATE_RETAIN_DAYS = 30
+SHANGHAI_TZ = timezone(timedelta(hours=8), "Asia/Shanghai")
+
+
+def now_shanghai() -> datetime:
+    """Use Beijing time independently of the host timezone."""
+    return datetime.now(SHANGHAI_TZ)
 
 
 def grade_of(quality: int) -> str:
@@ -68,7 +74,7 @@ def setup_stdout() -> None:
 
 
 def log(message: str) -> None:
-    line = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {message}"
+    line = f"[{now_shanghai():%Y-%m-%d %H:%M:%S}] {message}"
     try:
         if sys.stdout is not None:  # pythonw 无控制台
             print(line)
@@ -131,7 +137,7 @@ def http_post(url: str, body: bytes, content_type: str, timeout: int = 20):
 
 def parse_hhmm(day: str, value: str) -> datetime | None:
     try:
-        return datetime.strptime(f"{day} {value}", "%Y-%m-%d %H:%M")
+        return datetime.strptime(f"{day} {value}", "%Y-%m-%d %H:%M").replace(tzinfo=SHANGHAI_TZ)
     except (TypeError, ValueError):
         return None
 
@@ -342,6 +348,14 @@ def resolve_token(channel: dict) -> str:
     return (channel.get("token") or "").strip()
 
 
+def response_code(response: str):
+    try:
+        payload = json.loads(response)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return payload.get("code") if isinstance(payload, dict) else None
+
+
 def send_wechat(config: dict, title: str, markdown: str) -> bool:
     channel = config["channels"]["wechat"]
     provider = (channel.get("provider") or "pushplus").lower()
@@ -358,7 +372,7 @@ def send_wechat(config: dict, title: str, markdown: str) -> bool:
             "template": "markdown",
         }, ensure_ascii=False).encode("utf-8")
         response = http_post("https://www.pushplus.plus/send", payload, "application/json")
-        if response and '"code":200' in response.replace(" ", ""):
+        if response_code(response) == 200:
             log("微信推送(PushPlus)已发送")
             return True
         log(f"微信推送(PushPlus)失败：{response}")
@@ -368,7 +382,7 @@ def send_wechat(config: dict, title: str, markdown: str) -> bool:
         from urllib.parse import urlencode
         payload = urlencode({"title": title, "desp": markdown}).encode("utf-8")
         response = http_post(f"https://sctapi.ftqq.com/{token}.send", payload, "application/x-www-form-urlencoded")
-        if response and '"code":0' in response.replace(" ", ""):
+        if response_code(response) == 0:
             log("微信推送(Server酱)已发送")
             return True
         log(f"微信推送(Server酱)失败：{response}")
@@ -378,20 +392,20 @@ def send_wechat(config: dict, title: str, markdown: str) -> bool:
     return False
 
 
-def dispatch(config: dict, title: str, markdown: str, dry_run: bool) -> None:
+def dispatch(config: dict, title: str, markdown: str, dry_run: bool) -> bool:
     if dry_run:
         log("[dry-run] 未实际发送")
-        return
+        return False
     wechat = config["channels"].get("wechat") or {}
     if not wechat.get("enabled"):
         log("微信推送未启用，本次不发送")
-        return
+        return False
     # 用 resolve_token 判断，才能识别出环境变量/Secrets 注入的 token
     if not resolve_token(wechat):
         log("微信推送已启用但未取到 token，跳过。本机请填 local_secrets.json，"
             "GitHub Actions 请配置 PUSHPLUS_TOKEN secret")
-        return
-    send_wechat(config, title, markdown)
+        return False
+    return send_wechat(config, title, markdown)
 
 
 # --------------------------------------------------------------------------
@@ -405,12 +419,16 @@ def in_window(now: datetime, start: str, end: str) -> bool:
 
 
 def prune_state(state: dict) -> dict:
-    cutoff = datetime.now() - timedelta(days=STATE_RETAIN_DAYS)
+    cutoff = now_shanghai() - timedelta(days=STATE_RETAIN_DAYS)
     kept = {}
     for key, stamp in (state.get("pushed") or {}).items():
         try:
-            if datetime.fromisoformat(stamp) >= cutoff:
-                kept[key] = stamp
+            parsed = datetime.fromisoformat(stamp)
+            # Legacy timestamps had no offset; preserve them as Beijing time.
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=SHANGHAI_TZ)
+            if parsed >= cutoff:
+                kept[key] = parsed.isoformat(timespec="seconds")
         except ValueError:
             continue
     state["pushed"] = kept
@@ -475,7 +493,7 @@ def main() -> int:
         return 1
     state = prune_state(load_json(STATE_PATH, {"pushed": {}}))
     location = config["location"]
-    now = datetime.now()
+    now = now_shanghai()
 
     payload = fetch_forecast(location["spot"])
     if not payload:
@@ -509,9 +527,9 @@ def main() -> int:
         log("---- 即将发送的内容（测试触发，格式与真实推送完全一致）----")
         log(title)
         log(markdown)
-        dispatch(config, title, markdown, args.dry_run)
+        sent = dispatch(config, title, markdown, args.dry_run)
         save_json(STATE_PATH, state)
-        return 0
+        return 0 if sent or args.dry_run else 1
 
     events, _ = evaluate(config, days, now, state, args.mode, args.force)
     if not events:
@@ -519,18 +537,22 @@ def main() -> int:
         save_json(STATE_PATH, state)
         return 0
 
+    send_failed = False
     for key, kind, day in events:
         markdown = build_markdown(day, crosscheck_short)
         title = f"{location['name']}晚霞 {day['quality']}分·{day['grade']}"
         log(f"---- 触发推送 {kind} / {day['date']} ----")
         log(title)
         log(markdown)
-        dispatch(config, title, markdown, args.dry_run)
-        if not args.dry_run:
+        sent = dispatch(config, title, markdown, args.dry_run)
+        if sent:
             state["pushed"][key] = now.isoformat(timespec="seconds")
+        elif not args.dry_run:
+            send_failed = True
+            log(f"推送失败，保留待重试事件：{key}")
 
     save_json(STATE_PATH, state)
-    return 0
+    return 1 if send_failed else 0
 
 
 if __name__ == "__main__":

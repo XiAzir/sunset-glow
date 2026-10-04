@@ -26,10 +26,12 @@ jobs:
 
       - name: 运行检查
         env:
+          TZ: Asia/Shanghai
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: python3 sunset_glow.py --mode alert
 
       - name: 回写去重状态
+        if: ${{ always() }}
         run: |
           git config user.name  "sunset-glow-bot"
           git config user.email "sunset-glow-bot@users.noreply.github.com"

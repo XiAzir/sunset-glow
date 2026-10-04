@@ -1,0 +1,12 @@
+[Unit]
+Description=Sunset glow digest schedule (Beijing time)
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:12:00 Asia/Shanghai
+Unit=sunset-glow@digest.service
+AccuracySec=1min
+RandomizedDelaySec=30
+Persistent=false
+
+[Install]
+WantedBy=timers.target

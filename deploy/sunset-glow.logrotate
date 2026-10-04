@@ -1,0 +1,10 @@
+/var/log/sunset-glow/*.log {
+    monthly
+    rotate 3
+    maxsize 1M
+    compress
+    missingok
+    notifempty
+    su sunset-glow sunset-glow
+    create 0600 sunset-glow sunset-glow
+}

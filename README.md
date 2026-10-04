@@ -4,9 +4,11 @@
 
 ## 当前部署状态
 
-**已在 GitHub Actions 上运行，本机定时任务已停用。**
+**支持 Linux 服务器定时部署，GitHub Actions 保留备用。详见 [deploy/README.md](deploy/README.md)。请勿同时启用两边调度。**
 
-- 仓库：<https://github.com/change1010/sunset-glow>（私有）
+脚本固定使用北京时间，仅发送接口成功后才写去重；失败退出码为 1。
+
+- 仓库：<https://github.com/XiAzir/sunset-glow>
 - 位置：武汉（黄鹤楼 / 长江大桥，`/api/spot/wuhan`）
 - 高分线：综合评分 **≥ 60**（官方分级：≥85 绝美 / ≥60 很棒 / ≥30 不错 / ≥1 平淡 / 0 无望）
 - 推送渠道：**只走微信**（PushPlus 消息token）
@@ -130,10 +132,10 @@ python sunset_glow.py --mode digest --force     # 忽略"今日已推送"去重
 
 | 文件 | 频率 | 模式 |
 |---|---|---|
-| `.github/workflows/digest.yml` | 每 6 小时（cron `12 */6 * * *`） | `--mode digest` |
-| `.github/workflows/alert.yml` | 每天 14:00–20:00 每小时（`7 14-20 * * *`） | `--mode alert` |
+| `.github/workflows/digest.yml` | 每 6 小时（UTC cron `12 4,10,16,22 * * *`） | `--mode digest` |
+| `.github/workflows/alert.yml` | 北京时间 14:07–20:07（UTC cron `7 6-12 * * *`） | `--mode alert` |
 
-cron 都用 `Asia/Shanghai` 时区，不需要自己换算 UTC。
+Actions cron 按 UTC 编写，脚本内部固定 UTC+8；服务器 timer 则显式指定 Asia/Shanghai。
 
 **为什么 cron 写 `:12` 和 `:07`，而不是整点？** GitHub 官方文档明确说 `The schedule event can be delayed during periods of high loads`，并建议 `schedule your workflow to run at a different time of the hour`。整点是全球最拥堵的时刻，错开能降低延迟概率。
 
@@ -148,7 +150,7 @@ cron 都用 `Asia/Shanghai` 时区，不需要自己换算 UTC。
 | `晚霞预报-日落前加推` → Run workflow | 跑一次加推检查 |
 | `连通性测试` → Run workflow | 只做网络探测，不发消息 |
 
-`test_push` 模式不会写状态文件，所以不会影响正常的去重逻辑。
+`test_push` 不新增去重记录，但仍更新最近校验信息；Actions 不回写测试状态。
 
 也可以在本机直接跑（token 从 `local_secrets.json` 读）：
 

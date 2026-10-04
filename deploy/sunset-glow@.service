@@ -1,0 +1,29 @@
+[Unit]
+Description=Sunset glow forecast (%i)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/sunset-glow.env
+
+[Service]
+Type=oneshot
+User=sunset-glow
+Group=sunset-glow
+WorkingDirectory=/opt/sunset-glow
+Environment=TZ=Asia/Shanghai
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=SUNSET_GLOW_STATE_PATH=/var/lib/sunset-glow/state.json
+Environment=SUNSET_GLOW_LOG_DIR=/var/log/sunset-glow
+EnvironmentFile=/etc/sunset-glow.env
+ExecStart=/usr/bin/flock --nonblock /var/lib/sunset-glow/run.lock /usr/bin/python3 -u /opt/sunset-glow/sunset_glow.py --mode %i
+StateDirectory=sunset-glow
+LogsDirectory=sunset-glow
+UMask=0077
+TimeoutStartSec=300
+MemoryMax=96M
+CPUQuota=20%
+TasksMax=16
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

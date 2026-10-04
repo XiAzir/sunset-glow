@@ -1,0 +1,12 @@
+[Unit]
+Description=Sunset glow alert schedule (Beijing time)
+
+[Timer]
+OnCalendar=*-*-* 14..20:07:00 Asia/Shanghai
+Unit=sunset-glow@alert.service
+AccuracySec=1min
+RandomizedDelaySec=30
+Persistent=false
+
+[Install]
+WantedBy=timers.target
